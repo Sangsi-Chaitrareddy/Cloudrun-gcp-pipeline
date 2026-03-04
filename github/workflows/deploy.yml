@@ -1,0 +1,55 @@
+name: Build and Deploy to Cloud Run
+
+# This tells GitHub to run the pipeline every time you push to the 'main' branch
+on:
+  push:
+    branches:
+      - main
+
+# Setting up variables so we don't have to type them over and over
+env:
+  PROJECT_ID: cts12-sfaheeal   # ⚠️ CHANGE THIS TO YOUR ACTUAL GCP PROJECT ID ⚠️
+  REGION: asia-southeast1 (Singapore)                    # Matches the Artifact Registry location we chose
+  REPO_NAME: devops-repo                 # The name of your Artifact Registry
+  SERVICE_NAME: my-flask-app             # The name your app will have in Cloud Run
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Get the code from GitHub
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Log into Google Cloud using the Secret we made
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
+
+      # Step 3: Configure Docker to talk to GCP Artifact Registry
+      - name: Configure Docker Auth
+        run: |-
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # Step 4: Build the Docker Image and Push it to Artifact Registry
+      - name: Build and Push Docker Image
+        run: |-
+          IMAGE_PATH="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+          docker build -t $IMAGE_PATH .
+          docker push $IMAGE_PATH
+
+      # Step 5: Deploy the Image to Cloud Run
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+          flags: '--allow-unauthenticated' # This allows anyone on the internet to see your website
+
+      # Step 6: Print out the live website URL!
+      - name: Show the Live URL
+        run: echo "App deployed successfully! Live URL is ${{ steps.deploy.outputs.url }}"
